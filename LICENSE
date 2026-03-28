@@ -1,13 +1,34 @@
-Proprietary License
+PROPRIETARY SOURCE CODE LICENSE
+Copyright (c) 2026 Jonathan Colletti. All Rights Reserved.
 
-Copyright (c) 2026 Jonathan Colletti. All rights reserved.
+1. DEFINITIONS
+   a. "Owner" refers to Jonathan Colletti.
+   b. "Authorized Entity" refers to the "Colletti Weather Office," a 
+      YouTube media channel and organization owned and operated 
+      exclusively by the Owner.
+   c. "Software" refers to all source code, documentation, and 
+      associated files within this repository.
 
-This software and its documentation are the exclusive property of Jonathan Colletti.
-Permission is hereby granted to view the source code within this GitHub repository. 
+2. OWNERSHIP AND INTELLECTUAL PROPERTY
+The Software is the sole and exclusive intellectual property of the Owner. 
+This repository is provided for public viewing and educational review 
+purposes only. No title to or ownership of the Software is transferred 
+to any third party.
 
-However, NO PERMISSION is granted to any person or entity to:
-1. Copy, modify, or distribute this software.
-2. Use the software for any commercial or non-commercial purpose.
-3. Sub-license or sell the software.
+3. EXCLUSIVE GRANT OF USE
+The Owner hereby grants exclusive permission to himself and the 
+Authorized Entity (Colletti Weather Office) to use, modify, execute, 
+and broadcast the Software for automated alerting and weather reporting.
 
-Any unauthorized use of this software is a violation of copyright law.
+4. RESTRICTIONS
+NO LICENSE is granted to any other person or entity. Any of the following 
+actions are strictly prohibited without prior written consent from the Owner:
+   a. Copying, redistributing, or sublicensing the Software.
+   b. Modifying or creating derivative works for public or commercial use.
+   c. Running or executing the Software on any system not owned by the Owner.
+
+5. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY 
+OR FITNESS FOR A PARTICULAR PURPOSE. THE OWNER SHALL NOT BE LIABLE FOR 
+ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
