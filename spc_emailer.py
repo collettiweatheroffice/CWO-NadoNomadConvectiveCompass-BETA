@@ -1,6 +1,6 @@
 # -*- coding: ascii -*-
 """
-CWO SPC Daily Outlook Emailer v7
+CWO SPC Daily Outlook Emailer v8
 Colletti Weather Office - LOT / MKX / DVN
 """
 
@@ -15,7 +15,7 @@ from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 from datetime import datetime, timezone
 
-#  CONFIG 
+# -- CONFIG -------------------------------------------------------------------
 GMAIL_USER = os.environ["GMAIL_USER"]
 GMAIL_PASS = os.environ["GMAIL_PASS"]
 TO_EMAIL   = os.environ.get("TO_EMAIL", GMAIL_USER)
@@ -42,49 +42,64 @@ OUTLOOK_PAGES = {
 
 TSTM_OUTLOOK_PAGE = SPC_BASE + "/products/exper/enhtstm/"
 
-FEATURE_BASE = "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/FeatureServer"
+FEATURE_BASE = (
+    "https://mapservices.weather.noaa.gov"
+    "/vector/rest/services/outlooks/SPC_wx_outlks/FeatureServer"
+)
 
-CAT_ORDER  = ["HIGH", "MDT", "ENH", "SLGT", "MRGL", "TSTM"]
-CAT_LABELS = {
-    "HIGH": "High Risk",
-    "MDT":  "Moderate Risk",
-    "ENH":  "Enhanced Risk",
-    "SLGT": "Slight Risk",
-    "MRGL": "Marginal Risk",
-    "TSTM": "General Thunderstorms",
+# Layer IDs on NOAA FeatureServer
+# 1  = Day 1 Categorical
+# 3  = Day 1 Tornado prob
+# 4  = Day 1 Wind prob
+# 5  = Day 1 Hail prob
+# 9  = Day 2 Categorical
+# 16 = Day 3 Categorical
+
+CAT_ORDER = ["HIGH", "MDT", "ENH", "SLGT", "MRGL", "TSTM"]
+
+# Risk label, color circle HTML entity, hex color
+CAT_META = {
+    "HIGH": ("High Risk",              "&#128308;", "#e74c3c"),
+    "MDT":  ("Moderate Risk",          "&#128992;", "#e67e22"),
+    "ENH":  ("Enhanced Risk",          "&#128993;", "#f1c40f"),
+    "SLGT": ("Slight Risk",            "&#128993;", "#f1c40f"),
+    "MRGL": ("Marginal Risk",          "&#128994;", "#2ecc71"),
+    "TSTM": ("General Thunderstorms",  "&#9898;",   "#95a5a6"),
 }
+NO_RISK = ("No Thunder / Below Threshold", "&#9898;", "#bdc3c7")
+
 PROB_VALUES = {
     "2": 2, "5": 5, "10": 10, "15": 15, "30": 30, "45": 45, "60": 60,
     "0.02": 2, "0.05": 5, "0.10": 10, "0.15": 15,
     "0.30": 30, "0.45": 45, "0.60": 60,
 }
-# 
+
+# Probability color thresholds
+def prob_color(pct):
+    if pct >= 45: return "#e74c3c"
+    if pct >= 30: return "#e67e22"
+    if pct >= 15: return "#f39c12"
+    if pct >= 10: return "#f1c40f"
+    if pct >=  5: return "#2ecc71"
+    return "#95a5a6"
+
+# -----------------------------------------------------------------------------
 
 
 def fetch_text(url, timeout=20):
     req = urllib.request.Request(url, headers={
-        "User-Agent": "CWO-SPC-Emailer/7.0 (collettiweather@gmail.com)",
+        "User-Agent": "CWO-SPC-Emailer/8.0 (collettiweather@gmail.com)",
         "Accept": "text/plain, text/html, application/json",
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", errors="replace")
 
 
-def fetch_bytes(url, timeout=20):
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "CWO-SPC-Emailer/7.0 (collettiweather@gmail.com)",
-        "Accept": "image/gif, image/png, image/*",
-        "Referer": "https://www.spc.noaa.gov/",
-    })
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
-
-
 def fetch_json(url):
     return json.loads(fetch_text(url))
 
 
-#  OUTLOOK TEXT 
+# -- OUTLOOK TEXT -------------------------------------------------------------
 
 def get_outlook_text(day=1):
     try:
@@ -107,18 +122,36 @@ def get_outlook_text(day=1):
 def get_national_category(text):
     upper = text.upper()
     pairs = [
-        ("PARTICULARLY DANGEROUS SITUATION", "PDS - Particularly Dangerous Situation"),
-        ("HIGH RISK",     "High Risk"),
-        ("MODERATE RISK", "Moderate Risk"),
-        ("ENHANCED RISK", "Enhanced Risk"),
-        ("SLIGHT RISK",   "Slight Risk"),
-        ("MARGINAL RISK", "Marginal Risk"),
-        ("THUNDERSTORMS", "General Thunderstorms"),
+        ("PARTICULARLY DANGEROUS SITUATION", "HIGH"),
+        ("HIGH RISK",     "HIGH"),
+        ("MODERATE RISK", "MDT"),
+        ("ENHANCED RISK", "ENH"),
+        ("SLIGHT RISK",   "SLGT"),
+        ("MARGINAL RISK", "MRGL"),
+        ("THUNDERSTORMS", "TSTM"),
     ]
-    for kw, label in pairs:
+    for kw, key in pairs:
         if kw in upper:
-            return label
-    return "No Thunder / Below Threshold"
+            return key
+    return None
+
+
+def cat_label(key):
+    if key and key in CAT_META:
+        return CAT_META[key][0]
+    return NO_RISK[0]
+
+
+def cat_circle(key):
+    if key and key in CAT_META:
+        return CAT_META[key][1]
+    return NO_RISK[1]
+
+
+def cat_color(key):
+    if key and key in CAT_META:
+        return CAT_META[key][2]
+    return NO_RISK[2]
 
 
 def extract_section(text, keyword):
@@ -132,50 +165,11 @@ def extract_section(text, keyword):
     return "No " + keyword.lower() + " section found in this outlook."
 
 
-#  IMAGE FETCHING 
-
-def fetch_convective_image():
-    candidates = [
-        SPC_BASE + "/products/outlook/day1otlk_prt.gif",
-        SPC_BASE + "/products/outlook/day1otlk_2000_prt.gif",
-        SPC_BASE + "/products/outlook/day1otlk_1630_prt.gif",
-        SPC_BASE + "/products/outlook/day1otlk_1200_prt.gif",
-        SPC_BASE + "/products/outlook/day1otlk_0100_prt.gif",
-    ]
-    for url in candidates:
-        try:
-            data = fetch_bytes(url)
-            if data and len(data) > 2000:
-                print("[CWO] Convective image: " + url)
-                return data
-        except Exception as e:
-            print("[CWO] Tried " + url + ": " + str(e))
-    print("[CWO] Could not fetch convective image.")
-    return None
-
-
-def fetch_thunderstorm_image():
-    candidates = [
-        SPC_BASE + "/products/exper/enhtstm/imgs/enhtstm.gif",
-        SPC_BASE + "/products/exper/enhtstm/imgs/enhtstm_latest.gif",
-        SPC_BASE + "/products/exper/enhtstm/enhtstm.gif",
-    ]
-    for url in candidates:
-        try:
-            data = fetch_bytes(url)
-            if data and len(data) > 2000:
-                print("[CWO] Thunderstorm image: " + url)
-                return data
-        except Exception as e:
-            print("[CWO] Tried " + url + ": " + str(e))
-    print("[CWO] Could not fetch thunderstorm image.")
-    return None
-
-
-#  CWO AREA RISK 
+# -- CWO AREA RISK ------------------------------------------------------------
 
 def query_layer(layer_id):
-    envelope = str(CWO_XMIN) + "," + str(CWO_YMIN) + "," + str(CWO_XMAX) + "," + str(CWO_YMAX)
+    envelope = (str(CWO_XMIN) + "," + str(CWO_YMIN) + ","
+                + str(CWO_XMAX) + "," + str(CWO_YMAX))
     params = urllib.parse.urlencode({
         "geometry":       envelope,
         "geometryType":   "esriGeometryEnvelope",
@@ -193,12 +187,12 @@ def query_layer(layer_id):
         return []
 
 
-def best_cat(feats):
+def best_cat_key(feats):
     found = {str(f.get("dn", f.get("DN", ""))).upper() for f in feats}
     for lvl in CAT_ORDER:
         if lvl in found:
-            return CAT_LABELS[lvl]
-    return "No Thunder / Below Threshold"
+            return lvl
+    return None
 
 
 def best_prob(feats):
@@ -211,17 +205,19 @@ def best_prob(feats):
 
 
 def get_cwo_risks():
-    cat  = best_cat(query_layer(1))
-    torn = best_prob(query_layer(3))
-    wind = best_prob(query_layer(4))
-    hail = best_prob(query_layer(5))
-    torn_str = str(torn) + "% tornado probability over CWO area" if torn else "Less than 2% (no contour over CWO area)"
-    wind_str = str(wind) + "% wind probability over CWO area"    if wind else "Less than 5% (no contour over CWO area)"
-    hail_str = str(hail) + "% hail probability over CWO area"    if hail else "Less than 5% (no contour over CWO area)"
-    return {"cat": cat, "torn": torn_str, "wind": wind_str, "hail": hail_str}
+    cat_key = best_cat_key(query_layer(1))
+    torn    = best_prob(query_layer(3))
+    wind    = best_prob(query_layer(4))
+    hail    = best_prob(query_layer(5))
+    return {
+        "cat_key": cat_key,
+        "torn":    torn,
+        "wind":    wind,
+        "hail":    hail,
+    }
 
 
-#  MESOSCALE DISCUSSIONS 
+# -- MESOSCALE DISCUSSIONS ----------------------------------------------------
 
 def get_active_mds():
     results = []
@@ -244,21 +240,7 @@ def get_active_mds():
     return results
 
 
-#  HTML HELPERS 
-
-def h(tag, content, style=""):
-    if style:
-        return "<" + tag + ' style="' + style + '">' + content + "</" + tag + ">"
-    return "<" + tag + ">" + content + "</" + tag + ">"
-
-
-def td(content, style=""):
-    return h("td", content, style)
-
-
-def tr(content, style=""):
-    return h("tr", content, style)
-
+# -- HTML HELPERS -------------------------------------------------------------
 
 def a(url, text, style=""):
     if style:
@@ -267,75 +249,66 @@ def a(url, text, style=""):
 
 
 def section_card(title, body_html, border_color="#1a1f5e"):
-    lines = []
-    lines.append('<div style="background:#fff;margin:10px 14px 0;border-radius:8px;')
-    lines.append('padding:20px 22px;border-top:4px solid ' + border_color + ';">')
-    lines.append('<h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;')
-    lines.append('text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">')
-    lines.append(title + "</h2>")
-    lines.append(body_html)
-    lines.append("</div>")
-    return "\n".join(lines)
+    out  = '<div style="background:#fff;margin:10px 14px 0;border-radius:8px;'
+    out += 'padding:20px 22px;border-top:4px solid ' + border_color + ';">'
+    out += '<h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;'
+    out += 'text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">'
+    out += title + "</h2>"
+    out += body_html
+    out += "</div>"
+    return out
 
 
-def risk_table_row(label, value, bg=""):
-    style_td1 = "padding:10px 14px;font-weight:700;color:#1a1f5e;font-size:14px;width:120px;"
-    style_td2 = "padding:10px 14px;font-size:14px;"
-    if bg:
-        return tr(td(label, style_td1) + td(value, style_td2), 'style="background:' + bg + ';"')
-    return tr(td(label, style_td1) + td(value, style_td2))
+def risk_pill(circle, label, color):
+    """Colored pill badge showing a risk level."""
+    out  = '<span style="display:inline-flex;align-items:center;gap:6px;'
+    out += 'background:' + color + '18;border:1px solid ' + color + ';'
+    out += 'border-radius:20px;padding:4px 12px;font-size:13px;font-weight:600;'
+    out += 'color:' + color + ';">'
+    out += circle + " " + label
+    out += "</span>"
+    return out
 
 
-def cwo_risk_row(label, value, label_color, bg=""):
-    style_td1 = "padding:10px 14px;font-weight:700;color:" + label_color + ";font-size:13px;width:120px;"
-    style_td2 = "padding:10px 14px;font-size:13px;"
-    if bg:
-        return tr(td(label, style_td1) + td(value, style_td2), 'style="background:' + bg + ';"')
-    return tr(td(label, style_td1) + td(value, style_td2))
+def prob_bar(label, pct, icon):
+    """Visual probability bar row."""
+    color   = prob_color(pct)
+    bar_w   = str(min(pct * 2, 100)) + "%"   # scale: 50% pct = full bar
+    pct_str = str(pct) + "%" if pct else "< 2%"
+    out  = '<div style="margin-bottom:12px;">'
+    out += '<div style="display:flex;justify-content:space-between;'
+    out += 'align-items:center;margin-bottom:4px;">'
+    out += '<span style="font-size:13px;font-weight:600;color:#333;">' + icon + " " + label + "</span>"
+    out += '<span style="font-size:13px;font-weight:700;color:' + color + ';">' + pct_str + "</span>"
+    out += "</div>"
+    out += '<div style="background:#eee;border-radius:4px;height:10px;width:100%;">'
+    if pct:
+        out += '<div style="background:' + color + ';width:' + bar_w + ';'
+        out += 'height:10px;border-radius:4px;"></div>'
+    out += "</div>"
+    out += "</div>"
+    return out
 
 
 def pre_block(text, border_color, bg_color):
-    lines = []
-    lines.append('<pre style="background:' + bg_color + ';border-left:3px solid ' + border_color + ';')
-    lines.append('padding:10px 14px;font-size:12px;white-space:pre-wrap;')
-    lines.append('border-radius:0 4px 4px 0;margin:0;color:#333;')
-    lines.append('line-height:1.6;font-family:monospace;">')
-    lines.append(text)
-    lines.append("</pre>")
-    return "\n".join(lines)
+    out  = '<pre style="background:' + bg_color + ';border-left:3px solid ' + border_color + ';'
+    out += 'padding:10px 14px;font-size:12px;white-space:pre-wrap;'
+    out += 'border-radius:0 4px 4px 0;margin:0;color:#333;'
+    out += 'line-height:1.6;font-family:monospace;">'
+    out += text
+    out += "</pre>"
+    return out
 
 
-def img_section(cid, alt_text, fallback_url, fallback_label):
-    lines = []
-    lines.append('<p style="font-size:13px;color:#555;margin:0 0 8px;">')
-    lines.append("Downloaded fresh at send time:</p>")
-    lines.append('<img src="cid:' + cid + '" alt="' + alt_text + '"')
-    lines.append('style="max-width:100%;height:auto;border-radius:6px;')
-    lines.append('border:1px solid #ddd;display:block;" />')
-    lines.append('<p style="font-size:11px;color:#aaa;margin:6px 0 0;text-align:right;">')
-    lines.append(a(fallback_url, "View " + fallback_label + " on SPC", "color:#1a3a5c;"))
-    lines.append("</p>")
-    return "\n".join(lines)
+# -- BUILD EMAIL --------------------------------------------------------------
 
+def build_html(day1_text, day2_text, day3_text, cwo, mds):
 
-def img_fallback_section(fallback_url, fallback_label):
-    lines = []
-    lines.append('<p style="color:#888;font-style:italic;font-size:13px;margin:4px 0;">')
-    lines.append("Image unavailable - ")
-    lines.append(a(fallback_url, "View " + fallback_label + " on SPC", "color:#1a3a5c;"))
-    lines.append("</p>")
-    return "\n".join(lines)
+    now_utc  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%MZ")
 
-
-#  BUILD EMAIL 
-
-def build_html(day1_text, day2_text, day3_text, cwo_risks, mds,
-               has_conv_img, has_tstm_img):
-
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%MZ")
-    nat1    = get_national_category(day1_text)
-    nat2    = get_national_category(day2_text)
-    nat3    = get_national_category(day3_text)
+    nat1_key = get_national_category(day1_text)
+    nat2_key = get_national_category(day2_text)
+    nat3_key = get_national_category(day3_text)
 
     torn_txt = extract_section(day1_text, "TORNADO")
     wind_txt = extract_section(day1_text, "WIND")
@@ -343,88 +316,94 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds,
     tstm_txt = extract_section(day1_text, "THUNDERSTORMS")
     summary  = day1_text[:1400].strip()
 
-    #  National risk table 
-    nat_rows  = risk_table_row("Day 1 Outlook", nat1, "#eef1f8")
-    nat_rows += risk_table_row("Day 2 Outlook", nat2)
-    nat_rows += risk_table_row("Day 3 Outlook", nat3, "#eef1f8")
-    nat_table = '<table style="width:100%;border-collapse:collapse;">' + nat_rows + "</table>"
-    nat_card  = section_card("National Categorical Risk", nat_table)
+    # -- National risk card --
+    def nat_row(day_label, key, page_url, bg=""):
+        circle = cat_circle(key)
+        label  = cat_label(key)
+        color  = cat_color(key)
+        pill   = risk_pill(circle, label, color)
+        view   = a(page_url, "View", "font-size:11px;color:#1a3a5c;text-decoration:none;")
+        row    = ('<td style="padding:10px 14px;font-weight:700;color:#1a1f5e;'
+                  'font-size:14px;width:120px;">' + day_label + "</td>"
+                  '<td style="padding:10px 14px;">' + pill + "</td>"
+                  '<td style="padding:10px 14px;text-align:right;">' + view + "</td>")
+        if bg:
+            return '<tr style="background:' + bg + ';">' + row + "</tr>"
+        return "<tr>" + row + "</tr>"
 
-    #  CWO risk table 
-    cwo_rows  = cwo_risk_row("Categorical", cwo_risks["cat"], "#1a1f5e", "#eef1f8")
-    cwo_rows += cwo_risk_row("Tornado",     cwo_risks["torn"], "#c0392b")
-    cwo_rows += cwo_risk_row("Wind",        cwo_risks["wind"], "#2471a3", "#eef1f8")
-    cwo_rows += cwo_risk_row("Hail",        cwo_risks["hail"], "#1e8449")
-    cwo_note  = '<p style="font-size:11px;color:#bbb;margin:10px 0 0;">'
-    cwo_note += "Based on SPC probability contours intersecting LOT/MKX/DVN bounding box.</p>"
-    cwo_table = '<table style="width:100%;border-collapse:collapse;">' + cwo_rows + "</table>" + cwo_note
-    cwo_card  = section_card("CWO Area Risk (LOT / MKX / DVN)", cwo_table, "#d4a843")
+    nat_body  = '<table style="width:100%;border-collapse:collapse;">'
+    nat_body += nat_row("Day 1 Outlook", nat1_key, OUTLOOK_PAGES[1], "#eef1f8")
+    nat_body += nat_row("Day 2 Outlook", nat2_key, OUTLOOK_PAGES[2])
+    nat_body += nat_row("Day 3 Outlook", nat3_key, OUTLOOK_PAGES[3], "#eef1f8")
+    nat_body += "</table>"
+    nat_card  = section_card("National Categorical Risk", nat_body)
 
-    #  Convective outlook image 
-    if has_conv_img:
-        conv_body = img_section("conv_img", "SPC Day 1 Convective Outlook", OUTLOOK_PAGES[1], "Convective Outlook")
-    else:
-        conv_body = img_fallback_section(OUTLOOK_PAGES[1], "Convective Outlook")
-    conv_card = section_card("Day 1 Convective Outlook Map", conv_body)
+    # -- CWO area risk card --
+    cwo_cat_key  = cwo["cat_key"]
+    cwo_circle   = cat_circle(cwo_cat_key)
+    cwo_lbl      = cat_label(cwo_cat_key)
+    cwo_color    = cat_color(cwo_cat_key)
+    cwo_pill     = risk_pill(cwo_circle, cwo_lbl, cwo_color)
 
-    #  Thunderstorm outlook image 
-    if has_tstm_img:
-        tstm_img_body = img_section("tstm_img", "SPC Thunderstorm Outlook", TSTM_OUTLOOK_PAGE, "Thunderstorm Outlook")
-    else:
-        tstm_img_body = img_fallback_section(TSTM_OUTLOOK_PAGE, "Thunderstorm Outlook")
-    tstm_card = section_card("SPC Thunderstorm Outlook", tstm_img_body)
+    cwo_body  = '<div style="margin-bottom:16px;">'
+    cwo_body += '<p style="margin:0 0 8px;font-weight:700;font-size:13px;color:#1a1f5e;">Categorical</p>'
+    cwo_body += cwo_pill
+    cwo_body += "</div>"
+    cwo_body += prob_bar("Tornado",   cwo["torn"], "&#127754;")
+    cwo_body += prob_bar("Wind",      cwo["wind"], "&#128168;")
+    cwo_body += prob_bar("Hail",      cwo["hail"], "&#129514;")
+    cwo_body += '<p style="font-size:11px;color:#bbb;margin:10px 0 0;">'
+    cwo_body += "Based on SPC probability contours intersecting the LOT/MKX/DVN bounding box.</p>"
+    cwo_card  = section_card("CWO Area Risk (LOT / MKX / DVN)", cwo_body, "#d4a843")
 
-    #  Hazard text 
-    hazard_lines = []
-    hazard_lines.append('<p style="font-weight:700;color:#c0392b;font-size:13px;margin:0 0 4px;">Tornado</p>')
-    hazard_lines.append(pre_block(torn_txt, "#c0392b", "#fdf2f0"))
-    hazard_lines.append('<p style="font-weight:700;color:#2471a3;font-size:13px;margin:14px 0 4px;">Wind</p>')
-    hazard_lines.append(pre_block(wind_txt, "#2471a3", "#eaf4fb"))
-    hazard_lines.append('<p style="font-weight:700;color:#1e8449;font-size:13px;margin:14px 0 4px;">Hail</p>')
-    hazard_lines.append(pre_block(hail_txt, "#1e8449", "#eafaf1"))
-    hazard_lines.append('<p style="font-weight:700;color:#6c3483;font-size:13px;margin:14px 0 4px;">Thunderstorms</p>')
-    hazard_lines.append(pre_block(tstm_txt, "#6c3483", "#f5eef8"))
-    hazard_card = section_card("Day 1 Hazard Text", "\n".join(hazard_lines))
+    # -- Hazard text card --
+    haz_body  = '<p style="font-weight:700;color:#c0392b;font-size:13px;margin:0 0 4px;">Tornado</p>'
+    haz_body += pre_block(torn_txt, "#c0392b", "#fdf2f0")
+    haz_body += '<p style="font-weight:700;color:#2471a3;font-size:13px;margin:14px 0 4px;">Wind</p>'
+    haz_body += pre_block(wind_txt, "#2471a3", "#eaf4fb")
+    haz_body += '<p style="font-weight:700;color:#1e8449;font-size:13px;margin:14px 0 4px;">Hail</p>'
+    haz_body += pre_block(hail_txt, "#1e8449", "#eafaf1")
+    haz_body += '<p style="font-weight:700;color:#6c3483;font-size:13px;margin:14px 0 4px;">Thunderstorms</p>'
+    haz_body += pre_block(tstm_txt, "#6c3483", "#f5eef8")
+    haz_card  = section_card("Day 1 Hazard Text", haz_body)
 
-    #  Full Day 1 text 
-    full_lines = []
-    full_lines.append('<pre style="background:#f4f6f8;padding:14px;font-size:12px;')
-    full_lines.append('white-space:pre-wrap;border-radius:6px;margin:0;color:#222;')
-    full_lines.append('line-height:1.65;font-family:monospace;">')
-    full_lines.append(summary)
-    full_lines.append("</pre>")
-    full_lines.append('<p style="font-size:12px;color:#888;margin:8px 0 0;">')
-    full_lines.append("Full product: " + a(OUTLOOK_PAGES[1], "SPC Day 1 Outlook", "color:#1a3a5c;"))
-    full_lines.append("</p>")
-    full_card = section_card("Day 1 Outlook Full Text", "\n".join(full_lines))
+    # -- Full text card --
+    full_body  = '<pre style="background:#f4f6f8;padding:14px;font-size:12px;'
+    full_body += 'white-space:pre-wrap;border-radius:6px;margin:0;color:#222;'
+    full_body += 'line-height:1.65;font-family:monospace;">' + summary + "</pre>"
+    full_body += '<p style="font-size:12px;color:#888;margin:8px 0 0;">'
+    full_body += "Full product: " + a(OUTLOOK_PAGES[1], "SPC Day 1 Outlook", "color:#1a3a5c;") + "</p>"
+    full_card  = section_card("Day 1 Outlook Full Text", full_body)
 
-    #  MDs 
+    # -- MD card --
     if mds:
-        md_rows = ""
+        md_inner  = '<table style="width:100%;border-collapse:collapse;background:#fffdf2;'
+        md_inner += 'border-radius:6px;overflow:hidden;border:1px solid #f0e8c8;">'
+        md_inner += ('<tr style="background:#fff3cd;">'
+                     '<td style="padding:8px 12px;font-size:11px;color:#7a5200;'
+                     'font-weight:700;text-transform:uppercase;width:70px;">MD #</td>'
+                     '<td style="padding:8px 12px;font-size:11px;color:#7a5200;'
+                     'font-weight:700;text-transform:uppercase;">Link</td>'
+                     '</tr>')
         for m in mds:
-            md_rows += tr(
-                td("#" + m["num"], "padding:8px 12px;font-size:13px;color:#7a5200;font-weight:700;width:70px;") +
-                td(a(m["url"], "Mesoscale Discussion #" + m["num"], "color:#1a3a5c;text-decoration:none;"),
-                   "padding:8px 12px;font-size:13px;"),
-                'style="border-bottom:1px solid #f0e8c8;"'
-            )
-        md_html  = '<table style="width:100%;border-collapse:collapse;background:#fffdf2;'
-        md_html += 'border-radius:6px;overflow:hidden;border:1px solid #f0e8c8;">'
-        md_html += tr(
-            td("MD #", "padding:8px 12px;font-size:11px;color:#7a5200;font-weight:700;text-transform:uppercase;width:70px;") +
-            td("Link", "padding:8px 12px;font-size:11px;color:#7a5200;font-weight:700;text-transform:uppercase;"),
-            'style="background:#fff3cd;"'
-        )
-        md_html += md_rows + "</table>"
+            md_inner += ('<tr style="border-bottom:1px solid #f0e8c8;">'
+                         '<td style="padding:8px 12px;font-size:13px;color:#7a5200;'
+                         'font-weight:700;">#' + m["num"] + "</td>"
+                         '<td style="padding:8px 12px;font-size:13px;">'
+                         + a(m["url"], "Mesoscale Discussion #" + m["num"],
+                             "color:#1a3a5c;text-decoration:none;")
+                         + "</td></tr>")
+        md_inner += "</table>"
     else:
-        md_html = '<p style="color:#888;font-style:italic;font-size:13px;margin:0;">'
-        md_html += "No active mesoscale discussions at time of send.</p>"
+        md_inner = ('<p style="color:#888;font-style:italic;font-size:13px;margin:0;">'
+                    "No active mesoscale discussions at time of send.</p>")
 
-    md_link  = '<p style="font-size:12px;color:#888;margin:10px 0 0;">'
-    md_link += a(SPC_BASE + "/products/md/", "All active MDs on SPC", "color:#1a3a5c;") + "</p>"
-    md_card  = section_card("Active Mesoscale Discussions", md_html + md_link)
+    md_body  = md_inner
+    md_body += '<p style="font-size:12px;color:#888;margin:10px 0 0;">'
+    md_body += a(SPC_BASE + "/products/md/", "All active MDs on SPC", "color:#1a3a5c;") + "</p>"
+    md_card  = section_card("Active Mesoscale Discussions", md_body)
 
-    #  SPC links 
+    # -- Links card --
     btn_style = ("display:inline-block;margin:4px 5px 4px 0;padding:7px 13px;"
                  "background:#1a1f5e;color:#d4a843;border-radius:5px;"
                  "font-size:12px;font-weight:700;text-decoration:none;")
@@ -439,63 +418,59 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds,
         btns += a(url, name, btn_style)
     links_card = section_card("SPC Links", btns)
 
-    #  Footer 
-    footer_lines = []
-    footer_lines.append('<div style="background:#1a1f5e;margin:14px 14px 0;border-radius:8px;')
-    footer_lines.append('padding:22px 24px;text-align:center;">')
-    footer_lines.append('<p style="margin:0 0 4px;color:#d4a843;font-weight:700;font-size:15px;">')
-    footer_lines.append("Colletti Weather Office</p>")
-    footer_lines.append('<p style="margin:0 0 4px;color:#8fa8d8;font-size:12px;">')
-    footer_lines.append(a("mailto:" + REPLY_TO, REPLY_TO, "color:#aac4ee;") + "</p>")
-    footer_lines.append('<p style="margin:0 0 14px;">')
-    footer_lines.append(a(YT_URL, "YouTube.com/@MidwestMeteorology",
-                          "color:#d4a843;font-size:13px;font-weight:700;text-decoration:none;") + "</p>")
-    footer_lines.append('<hr style="border:none;border-top:1px solid #2a3270;margin:12px 0;" />')
-    footer_lines.append('<p style="margin:0;color:#5566aa;font-size:11px;line-height:1.8;">')
-    footer_lines.append("You are subscribed to CWO weather alerts.<br />")
-    footer_lines.append("Per federal law (CAN-SPAM Act), you may unsubscribe at any time.<br />")
-    footer_lines.append(a(UNSUB_URL, "Click here to unsubscribe", "color:#aac4ee;") + "</p>")
-    footer_lines.append('<p style="margin:8px 0 0;color:#3a4488;font-size:10px;">')
-    footer_lines.append("Automated digest - always verify with official NWS/SPC products.</p>")
-    footer_lines.append("</div>")
-    footer = "\n".join(footer_lines)
+    # -- Footer --
+    footer  = '<div style="background:#1a1f5e;margin:14px 14px 0;border-radius:8px;'
+    footer += 'padding:22px 24px;text-align:center;">'
+    footer += '<p style="margin:0 0 4px;color:#d4a843;font-weight:700;font-size:15px;">'
+    footer += "Colletti Weather Office</p>"
+    footer += '<p style="margin:0 0 4px;color:#8fa8d8;font-size:12px;">'
+    footer += a("mailto:" + REPLY_TO, REPLY_TO, "color:#aac4ee;") + "</p>"
+    footer += '<p style="margin:0 0 14px;">'
+    footer += a(YT_URL, "YouTube.com/@MidwestMeteorology",
+                "color:#d4a843;font-size:13px;font-weight:700;text-decoration:none;")
+    footer += "</p>"
+    footer += '<hr style="border:none;border-top:1px solid #2a3270;margin:12px 0;" />'
+    footer += '<p style="margin:0;color:#5566aa;font-size:11px;line-height:1.8;">'
+    footer += "You are subscribed to CWO weather alerts.<br />"
+    footer += "Per federal law (CAN-SPAM Act), you may unsubscribe at any time.<br />"
+    footer += a(UNSUB_URL, "Click here to unsubscribe", "color:#aac4ee;") + "</p>"
+    footer += '<p style="margin:8px 0 0;color:#3a4488;font-size:10px;">'
+    footer += "Automated digest - always verify with official NWS/SPC products.</p>"
+    footer += "</div>"
 
-    #  Assemble 
-    parts = []
-    parts.append("<!DOCTYPE html>")
-    parts.append('<html><body style="margin:0;padding:0;background:#eef0f5;font-family:Arial,Helvetica,sans-serif;">')
-    parts.append('<div style="max-width:680px;margin:0 auto;">')
+    # -- Assemble --
+    out  = "<!DOCTYPE html>"
+    out += '<html><body style="margin:0;padding:0;background:#eef0f5;'
+    out += 'font-family:Arial,Helvetica,sans-serif;">'
+    out += '<div style="max-width:680px;margin:0 auto;">'
 
     # Header
-    parts.append('<div style="background:#1a1f5e;padding:28px 28px 22px;text-align:center;">')
-    parts.append('<img src="cid:cwo_logo" alt="Colletti Weather Office"')
-    parts.append('style="max-width:130px;height:auto;display:block;margin:0 auto 14px;" />')
-    parts.append('<h1 style="margin:0;color:#d4a843;font-size:20px;letter-spacing:1.5px;')
-    parts.append('text-transform:uppercase;font-weight:700;">Daily SPC Outlook Brief</h1>')
-    parts.append('<p style="margin:6px 0 2px;color:#8fa8d8;font-size:13px;">')
-    parts.append("NWS Chicago (LOT) &middot; NWS Milwaukee (MKX) &middot; NWS Quad Cities (DVN)</p>")
-    parts.append('<p style="margin:0;color:#5566aa;font-size:11px;">' + now_utc + "</p>")
-    parts.append("</div>")
+    out += '<div style="background:#1a1f5e;padding:28px 28px 22px;text-align:center;">'
+    out += '<img src="cid:cwo_logo" alt="Colletti Weather Office" '
+    out += 'style="max-width:130px;height:auto;display:block;margin:0 auto 14px;" />'
+    out += '<h1 style="margin:0;color:#d4a843;font-size:20px;letter-spacing:1.5px;'
+    out += 'text-transform:uppercase;font-weight:700;">Daily SPC Outlook Brief</h1>'
+    out += '<p style="margin:6px 0 2px;color:#8fa8d8;font-size:13px;">'
+    out += "NWS Chicago (LOT) &middot; NWS Milwaukee (MKX) &middot; NWS Quad Cities (DVN)</p>"
+    out += '<p style="margin:0;color:#5566aa;font-size:11px;">' + now_utc + "</p>"
+    out += "</div>"
 
-    parts.append(nat_card)
-    parts.append(cwo_card)
-    parts.append(conv_card)
-    parts.append(tstm_card)
-    parts.append(hazard_card)
-    parts.append(full_card)
-    parts.append(md_card)
-    parts.append(links_card)
-    parts.append(footer)
-    parts.append('<div style="height:18px;"></div>')
-    parts.append("</div>")
-    parts.append("</body></html>")
+    out += nat_card
+    out += cwo_card
+    out += haz_card
+    out += full_card
+    out += md_card
+    out += links_card
+    out += footer
+    out += '<div style="height:18px;"></div>'
+    out += "</div></body></html>"
 
-    return "\n".join(parts)
+    return out
 
 
-#  SEND 
+# -- SEND ---------------------------------------------------------------------
 
-def send_email(subject, html_body, conv_img=None, tstm_img=None):
+def send_email(subject, html_body):
     msg = MIMEMultipart("related")
     msg["Subject"]  = subject
     msg["From"]     = GMAIL_USER
@@ -517,56 +492,41 @@ def send_email(subject, html_body, conv_img=None, tstm_img=None):
     else:
         print("[CWO] WARNING: cwo_logo.png not found at " + logo_path)
 
-    if conv_img:
-        img = MIMEImage(conv_img, _subtype="gif")
-        img.add_header("Content-ID", "<conv_img>")
-        img.add_header("Content-Disposition", "inline", filename="day1outlook.gif")
-        msg.attach(img)
-        print("[CWO] Convective image attached.")
-
-    if tstm_img:
-        img2 = MIMEImage(tstm_img, _subtype="gif")
-        img2.add_header("Content-ID", "<tstm_img>")
-        img2.add_header("Content-Disposition", "inline", filename="thunderstorm_outlook.gif")
-        msg.attach(img2)
-        print("[CWO] Thunderstorm image attached.")
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
     print("[CWO] Email sent to " + TO_EMAIL)
 
 
-#  MAIN 
+# -- MAIN ---------------------------------------------------------------------
 
 def main():
     print("[CWO] Fetching outlook texts...")
     day1_text = get_outlook_text(1)
     day2_text = get_outlook_text(2)
     day3_text = get_outlook_text(3)
-    print("[CWO] Day 1: " + get_national_category(day1_text))
+
+    nat1_key = get_national_category(day1_text)
+    print("[CWO] Day 1 national: " + cat_label(nat1_key))
 
     print("[CWO] Querying CWO area risks...")
-    cwo_risks = get_cwo_risks()
-    print("[CWO] CWO: " + cwo_risks["cat"])
+    cwo = get_cwo_risks()
+    print("[CWO] CWO categorical: " + cat_label(cwo["cat_key"]))
+    print("[CWO] CWO tornado: " + str(cwo["torn"]) + "%")
 
     print("[CWO] Fetching MDs...")
     mds = get_active_mds()
     print("[CWO] " + str(len(mds)) + " active MD(s)")
 
-    print("[CWO] Fetching convective outlook image...")
-    conv_img = fetch_convective_image()
+    # Subject line: CWO SPC Digest | Mar 29, 2026 | National: Slight Risk | Area: Marginal Risk
+    now_ct  = datetime.now(timezone.utc)
+    date_str = now_ct.strftime("%b %d, %Y")
+    subject  = ("CWO SPC Digest | " + date_str
+                + " | National: " + cat_label(nat1_key)
+                + " | Area: " + cat_label(cwo["cat_key"]))
 
-    print("[CWO] Fetching thunderstorm outlook image...")
-    tstm_img = fetch_thunderstorm_image()
-
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    nat1    = get_national_category(day1_text)
-    subject = "[CWO] SPC Brief - " + now_str + " | Day 1: " + nat1 + " | CWO: " + cwo_risks["cat"]
-
-    html = build_html(day1_text, day2_text, day3_text, cwo_risks, mds,
-                      conv_img is not None, tstm_img is not None)
-    send_email(subject, html, conv_img, tstm_img)
+    html = build_html(day1_text, day2_text, day3_text, cwo, mds)
+    send_email(subject, html)
     print("[CWO] Done.")
 
 
