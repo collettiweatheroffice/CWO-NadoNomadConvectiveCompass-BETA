@@ -1,5 +1,5 @@
 """
-CWO SPC Daily Outlook Emailer v4
+CWO SPC Daily Outlook Emailer v5
 Colletti Weather Office - LOT / MKX / DVN
 """
 
@@ -24,73 +24,72 @@ YT_URL     = "https://www.youtube.com/@MidwestMeteorology"
 
 SPC_BASE   = "https://www.spc.noaa.gov"
 
-# CWO bounding box: LOT + MKX + DVN combined (lon/lat)
+# CWO bounding box: LOT + MKX + DVN combined
 CWO_XMIN, CWO_XMAX = -91.5, -86.5
 CWO_YMIN, CWO_YMAX =  40.5,  44.0
 
-# Raw text product endpoints (tgftp — always available)
+# Raw text product endpoints
 TEXT_URLS = {
     1: "https://tgftp.nws.noaa.gov/data/raw/ac/acus01.kwns.swo.dy1.txt",
     2: "https://tgftp.nws.noaa.gov/data/raw/ac/acus02.kwns.swo.dy2.txt",
     3: "https://tgftp.nws.noaa.gov/data/raw/ac/acus03.kwns.swo.dy3.txt",
 }
 
-# SPC FeatureServer layer IDs (mapservices.weather.noaa.gov)
-# Layer 1  = Day 1 Categorical
-# Layer 3  = Day 1 Probabilistic Tornado
-# Layer 4  = Day 1 Probabilistic Wind (index 4 in FeatureServer = layer 4)
-# Layer 5  = Day 1 Probabilistic Hail
-# Layer 9  = Day 2 Categorical
-# Layer 16 = Day 3 Categorical
-FEATURE_BASE = "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/FeatureServer"
+# SPC thunderstorm probability image URL (downloaded fresh each run)
+TSTM_IMG_URL = "https://www.spc.noaa.gov/products/outlook/day1otlk_1200.gif"
+TSTM_IMG_URL_ALT = "https://www.spc.noaa.gov/products/outlook/day1otlk_0100.gif"
 
-# Outlook page links for "View" buttons
+# Outlook page links
 OUTLOOK_PAGES = {
     1: f"{SPC_BASE}/products/outlook/day1otlk.html",
     2: f"{SPC_BASE}/products/outlook/day2otlk.html",
     3: f"{SPC_BASE}/products/outlook/day3otlk.html",
 }
 
-# Categorical risk label map (dn field values from NOAA FeatureServer)
-CAT_LABELS = {
-    "TSTM":   "⚪ General Thunderstorms",
-    "MRGL":   "🟢 Marginal Risk",
-    "SLGT":   "🟡 Slight Risk",
-    "ENH":    "🟡 Enhanced Risk",
-    "MDT":    "🟠 Moderate Risk",
-    "HIGH":   "🔴 High Risk",
-    "SIGN":   "🔴 Significant (Hatched)",
-}
+# NOAA FeatureServer for area-specific risk
+FEATURE_BASE = "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/FeatureServer"
 
-PROB_LABELS = {
-    "0.02": "2%", "0.05": "5%", "0.10": "10%", "0.15": "15%",
-    "0.30": "30%", "0.45": "45%", "0.60": "60%",
-    "2":  "2%",  "5":  "5%",  "10": "10%", "15": "15%",
-    "30": "30%", "45": "45%", "60": "60%",
+CAT_ORDER  = ["HIGH", "MDT", "ENH", "SLGT", "MRGL", "TSTM"]
+CAT_LABELS = {
+    "HIGH": "🔴 High Risk",
+    "MDT":  "🟠 Moderate Risk",
+    "ENH":  "🟡 Enhanced Risk",
+    "SLGT": "🟡 Slight Risk",
+    "MRGL": "🟢 Marginal Risk",
+    "TSTM": "⚪ General Thunderstorms",
 }
+PROB_VALUES = {"2":2,"5":5,"10":10,"15":15,"30":30,"45":45,"60":60,
+               "0.02":2,"0.05":5,"0.10":10,"0.15":15,"0.30":30,"0.45":45,"0.60":60}
 # ───────────────────────────────────────────────────────────────────────────────
 
 
-def fetch(url, timeout=20):
+def fetch_text(url, timeout=20):
     req = urllib.request.Request(url, headers={
-        "User-Agent": "CWO-SPC-Emailer/4.0 (collettiweather@gmail.com)",
-        "Accept": "text/plain, text/html, application/json, application/geo+json",
+        "User-Agent": "CWO-SPC-Emailer/5.0 (collettiweather@gmail.com)",
+        "Accept": "text/plain, text/html, application/json",
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", errors="replace")
 
 
+def fetch_bytes(url, timeout=20):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "CWO-SPC-Emailer/5.0 (collettiweather@gmail.com)",
+        "Accept": "image/gif, image/png, image/*",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
 def fetch_json(url):
-    return json.loads(fetch(url))
+    return json.loads(fetch_text(url))
 
 
-# ── TEXT PRODUCT PARSING ───────────────────────────────────────────────────────
+# ── OUTLOOK TEXT ───────────────────────────────────────────────────────────────
 
 def get_outlook_text(day=1):
-    """Fetch raw SPC convective outlook text from tgftp."""
-    url = TEXT_URLS.get(day, "")
     try:
-        raw = fetch(url)
+        raw   = fetch_text(TEXT_URLS[day])
         lines = raw.splitlines()
         body, in_body = [], False
         for line in lines:
@@ -107,9 +106,8 @@ def get_outlook_text(day=1):
 
 
 def get_national_category(text):
-    """Parse the highest national risk from text."""
     upper = text.upper()
-    for keyword, label in [
+    for kw, label in [
         ("PARTICULARLY DANGEROUS SITUATION", "🔴 PDS — Particularly Dangerous Situation"),
         ("HIGH RISK",     "🔴 High Risk"),
         ("MODERATE RISK", "🟠 Moderate Risk"),
@@ -118,13 +116,12 @@ def get_national_category(text):
         ("MARGINAL RISK", "🟢 Marginal Risk"),
         ("THUNDERSTORMS", "⚪ General Thunderstorms"),
     ]:
-        if keyword in upper:
+        if kw in upper:
             return label
     return "⚪ No Thunder / Below Threshold"
 
 
 def extract_section(text, keyword):
-    """Pull a named hazard section from text."""
     m = re.search(
         rf"\.\.\.{keyword}\.\.\..*?(?=\.\.\.[A-Z]{{3,}}\.\.\.|\Z)",
         text, re.DOTALL | re.IGNORECASE
@@ -135,164 +132,135 @@ def extract_section(text, keyword):
     return f"No {keyword.lower()} section found in this outlook."
 
 
-# ── GEOJSON AREA RISK CHECK ────────────────────────────────────────────────────
+# ── THUNDERSTORM IMAGE ─────────────────────────────────────────────────────────
 
-def query_feature_layer(layer_id, geometry_envelope):
-    """
-    Query a NOAA FeatureServer layer for features intersecting a bounding box.
-    Returns list of feature attribute dicts.
-    """
+def fetch_tstm_image():
+    """Download the SPC Day 1 outlook GIF fresh. Returns bytes or None."""
+    # SPC names the file by issuance time; try common times
+    now_utc = datetime.now(timezone.utc)
+    candidates = []
+    for hour in [20, 16, 13, 12, 6, 1]:
+        candidates.append(
+            f"https://www.spc.noaa.gov/products/outlook/day1otlk_{hour:04d}.gif"
+        )
+    # Also try the generic latest
+    candidates.insert(0, "https://www.spc.noaa.gov/products/outlook/day1otlk.gif")
+
+    for url in candidates:
+        try:
+            data = fetch_bytes(url)
+            if data and len(data) > 1000:   # real GIF, not an error page
+                print(f"[CWO] Thunderstorm image fetched from {url}")
+                return data
+        except Exception:
+            continue
+    print("[CWO] Could not fetch thunderstorm image.")
+    return None
+
+
+# ── CWO AREA RISK ──────────────────────────────────────────────────────────────
+
+def query_layer(layer_id):
+    envelope = f"{CWO_XMIN},{CWO_YMIN},{CWO_XMAX},{CWO_YMAX}"
     params = urllib.parse.urlencode({
-        "geometry": geometry_envelope,
+        "geometry":     envelope,
         "geometryType": "esriGeometryEnvelope",
-        "spatialRel": "esriSpatialRelIntersects",
-        "inSR": "4326",
-        "outFields": "*",
+        "spatialRel":   "esriSpatialRelIntersects",
+        "inSR":         "4326",
+        "outFields":    "*",
         "returnGeometry": "false",
-        "f": "json",
+        "f":            "json",
     })
-    url = f"{FEATURE_BASE}/{layer_id}/query?{params}"
     try:
-        data = fetch_json(url)
-        features = data.get("features", [])
-        return [f.get("attributes", {}) for f in features]
+        data = fetch_json(f"{FEATURE_BASE}/{layer_id}/query?{params}")
+        return [f.get("attributes", {}) for f in data.get("features", [])]
     except Exception as e:
-        print(f"[CWO] FeatureServer layer {layer_id} query failed: {e}")
+        print(f"[CWO] Layer {layer_id} query failed: {e}")
         return []
 
 
-def get_cwo_area_risks():
-    """
-    Query NOAA FeatureServer for risk levels overlapping the CWO bounding box.
-    Returns a dict with categorical and prob risk strings for each hazard.
-    """
-    envelope = f"{CWO_XMIN},{CWO_YMIN},{CWO_XMAX},{CWO_YMAX}"
+def best_cat(feats):
+    found = {str(f.get("dn", f.get("DN", ""))).upper() for f in feats}
+    for lvl in CAT_ORDER:
+        if lvl in found:
+            return CAT_LABELS[lvl]
+    return "⚪ No Thunder / Below Threshold"
 
-    results = {
-        "cat":  "Not available",
-        "torn": "Not available",
-        "wind": "Not available",
-        "hail": "Not available",
+
+def best_prob(feats):
+    vals = []
+    for f in feats:
+        raw = str(f.get("dn", f.get("DN", ""))).strip()
+        if raw in PROB_VALUES:
+            vals.append(PROB_VALUES[raw])
+    return max(vals) if vals else 0
+
+
+def get_cwo_risks():
+    cat  = best_cat(query_layer(1))
+    torn = best_prob(query_layer(3))
+    wind = best_prob(query_layer(4))
+    hail = best_prob(query_layer(5))
+    return {
+        "cat":  cat,
+        "torn": f"{torn}% tornado probability" if torn else "< 2% (no contour over CWO area)",
+        "wind": f"{wind}% wind probability"    if wind else "< 5% (no contour over CWO area)",
+        "hail": f"{hail}% hail probability"    if hail else "< 5% (no contour over CWO area)",
     }
-
-    # Day 1 Categorical (layer 1)
-    cat_feats = query_feature_layer(1, envelope)
-    if cat_feats:
-        # Pick highest risk
-        order = ["HIGH", "MDT", "ENH", "SLGT", "MRGL", "TSTM"]
-        found = set(str(f.get("dn", "")).upper() for f in cat_feats)
-        for level in order:
-            if level in found:
-                results["cat"] = CAT_LABELS.get(level, level)
-                break
-        if results["cat"] == "Not available":
-            results["cat"] = "⚪ No Thunder / Below Threshold"
-    else:
-        results["cat"] = "⚪ No Thunder / Below Threshold"
-
-    # Day 1 Probabilistic Tornado (layer 3)
-    torn_feats = query_feature_layer(3, envelope)
-    if torn_feats:
-        probs = []
-        for f in torn_feats:
-            dn = str(f.get("dn", f.get("DN", ""))).strip()
-            label = PROB_LABELS.get(dn, dn)
-            if label:
-                probs.append(label)
-        if probs:
-            results["torn"] = f"Up to {max(probs, key=lambda x: float(x.replace('%','')))} tornado probability over CWO area"
-        else:
-            results["torn"] = "< 2% (no tornado probability contour over CWO area)"
-    else:
-        results["torn"] = "< 2% (no tornado probability contour over CWO area)"
-
-    # Day 1 Probabilistic Wind (layer 4)
-    wind_feats = query_feature_layer(4, envelope)
-    if wind_feats:
-        probs = []
-        for f in wind_feats:
-            dn = str(f.get("dn", f.get("DN", ""))).strip()
-            label = PROB_LABELS.get(dn, dn)
-            if label:
-                probs.append(label)
-        if probs:
-            results["wind"] = f"Up to {max(probs, key=lambda x: float(x.replace('%','')))} wind probability over CWO area"
-        else:
-            results["wind"] = "< 5% (no wind probability contour over CWO area)"
-    else:
-        results["wind"] = "< 5% (no wind probability contour over CWO area)"
-
-    # Day 1 Probabilistic Hail (layer 5)
-    hail_feats = query_feature_layer(5, envelope)
-    if hail_feats:
-        probs = []
-        for f in hail_feats:
-            dn = str(f.get("dn", f.get("DN", ""))).strip()
-            label = PROB_LABELS.get(dn, dn)
-            if label:
-                probs.append(label)
-        if probs:
-            results["hail"] = f"Up to {max(probs, key=lambda x: float(x.replace('%','')))} hail probability over CWO area"
-        else:
-            results["hail"] = "< 5% (no hail probability contour over CWO area)"
-    else:
-        results["hail"] = "< 5% (no hail probability contour over CWO area)"
-
-    return results
 
 
 # ── MESOSCALE DISCUSSIONS ──────────────────────────────────────────────────────
 
 def get_active_mds():
+    """Scrape SPC MD page directly — most reliable source."""
     results = []
     try:
-        data = fetch_json("https://api.weather.gov/products/types/MCD/locations/KWNS?limit=10")
-        for p in data.get("@graph", []):
-            num_m = re.search(r"MCD\s*(\d+)", p.get("productName", ""), re.IGNORECASE)
-            num   = num_m.group(1) if num_m else "???"
+        html  = fetch_text(f"{SPC_BASE}/products/md/")
+        # Find active MD links — SPC lists them as md####.html
+        links = re.findall(r'href="(?:\./)?md(\d{4})\.html"', html)
+        seen  = set()
+        for num in links:
+            if num in seen:
+                continue
+            seen.add(num)
+            # Verify the MD actually exists by checking if the link is real
             results.append({
-                "num":   num,
-                "title": p.get("productName", f"Mesoscale Discussion #{num}"),
-                "url":   f"{SPC_BASE}/products/md/md{num.zfill(4)}.html",
-                "time":  p.get("issuanceTime", "")[:10],
+                "num":   str(int(num)),   # strip leading zeros for display
+                "url":   f"{SPC_BASE}/products/md/md{num}.html",
             })
+            if len(results) >= 6:
+                break
     except Exception as e:
-        print(f"[CWO] NWS API MD failed: {e} — trying SPC scrape")
-        try:
-            html  = fetch(f"{SPC_BASE}/products/md/")
-            links = re.findall(r'href="[./]*/products/md/(md\d+\.html)"', html)
-            seen  = set()
-            for link in links[:8]:
-                num_m = re.search(r"md(\d+)\.html", link)
-                num   = (num_m.group(1).lstrip("0") or "0") if num_m else "???"
-                if num in seen:
-                    continue
-                seen.add(num)
-                results.append({
-                    "num":   num,
-                    "title": f"Mesoscale Discussion #{num}",
-                    "url":   f"{SPC_BASE}/products/md/md{num.zfill(4)}.html",
-                    "time":  "",
-                })
-        except Exception as e2:
-            print(f"[CWO] SPC MD scrape also failed: {e2}")
+        print(f"[CWO] MD scrape failed: {e}")
     return results
 
 
 # ── EMAIL BUILD ────────────────────────────────────────────────────────────────
 
-def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
+def build_html(day1_text, day2_text, day3_text, cwo_risks, mds, has_tstm_img):
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%MZ")
 
     nat1 = get_national_category(day1_text)
     nat2 = get_national_category(day2_text)
     nat3 = get_national_category(day3_text)
 
-    torn_txt  = extract_section(day1_text, "TORNADO")
-    wind_txt  = extract_section(day1_text, "WIND")
-    hail_txt  = extract_section(day1_text, "HAIL")
-    tstm_txt  = extract_section(day1_text, "THUNDERSTORMS")
-    summary   = day1_text[:1400].strip()
+    torn_txt = extract_section(day1_text, "TORNADO")
+    wind_txt = extract_section(day1_text, "WIND")
+    hail_txt = extract_section(day1_text, "HAIL")
+    tstm_txt = extract_section(day1_text, "THUNDERSTORMS")
+    summary  = day1_text[:1400].strip()
+
+    # Thunderstorm image block
+    if has_tstm_img:
+        tstm_img_html = """
+        <p style="font-size:13px;color:#555;margin:0 0 10px;">SPC Day 1 Convective Outlook (downloaded at send time):</p>
+        <img src="cid:tstm_img" alt="SPC Day 1 Outlook"
+             style="max-width:100%;height:auto;border-radius:6px;border:1px solid #ddd;display:block;" />"""
+    else:
+        tstm_img_html = f"""
+        <p style="color:#888;font-style:italic;font-size:13px;">
+          Image could not be fetched. <a href="{OUTLOOK_PAGES[1]}" style="color:#1a3a5c;">View on SPC ↗</a>
+        </p>"""
 
     # MDs
     if mds:
@@ -300,35 +268,39 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
         <tr style="border-bottom:1px solid #f0e8c8;">
           <td style="padding:8px 12px;font-size:13px;color:#7a5200;font-weight:700;">#{m['num']}</td>
           <td style="padding:8px 12px;font-size:13px;">
-            <a href="{m['url']}" style="color:#1a3a5c;text-decoration:none;">{m['title']}</a>
+            <a href="{m['url']}" style="color:#1a3a5c;text-decoration:none;">
+              Mesoscale Discussion #{m['num']}
+            </a>
           </td>
-          <td style="padding:8px 12px;font-size:12px;color:#999;">{m['time']}</td>
         </tr>""" for m in mds)
         md_html = f"""
-        <table style="width:100%;border-collapse:collapse;background:#fffdf2;border-radius:6px;overflow:hidden;border:1px solid #f0e8c8;">
+        <table style="width:100%;border-collapse:collapse;background:#fffdf2;border-radius:6px;
+                      overflow:hidden;border:1px solid #f0e8c8;">
           <tr style="background:#fff3cd;">
-            <th style="padding:8px 12px;text-align:left;font-size:11px;color:#7a5200;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">MD #</th>
-            <th style="padding:8px 12px;text-align:left;font-size:11px;color:#7a5200;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Title</th>
-            <th style="padding:8px 12px;text-align:left;font-size:11px;color:#7a5200;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Date</th>
+            <th style="padding:8px 12px;text-align:left;font-size:11px;color:#7a5200;
+                       font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:70px;">MD #</th>
+            <th style="padding:8px 12px;text-align:left;font-size:11px;color:#7a5200;
+                       font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Link</th>
           </tr>
           {md_rows}
         </table>"""
     else:
         md_html = "<p style='color:#888;font-style:italic;font-size:13px;margin:0;'>No active mesoscale discussions at time of send.</p>"
 
-    # SPC link buttons
+    # SPC link buttons (cleaned up — no tornado/wind/hail prob links)
     btns = ""
     for name, url in [
-        ("Day 1 Outlook",     OUTLOOK_PAGES[1]),
-        ("Day 2 Outlook",     OUTLOOK_PAGES[2]),
-        ("Day 3 Outlook",     OUTLOOK_PAGES[3]),
-        ("Tornado Prob",      f"{SPC_BASE}/products/outlook/day1probotlk.html#torn"),
-        ("Wind Prob",         f"{SPC_BASE}/products/outlook/day1probotlk.html#wind"),
-        ("Hail Prob",         f"{SPC_BASE}/products/outlook/day1probotlk.html#hail"),
-        ("Active MDs",        f"{SPC_BASE}/products/md/"),
-        ("SPC Homepage",      SPC_BASE),
+        ("Day 1 Outlook", OUTLOOK_PAGES[1]),
+        ("Day 2 Outlook", OUTLOOK_PAGES[2]),
+        ("Day 3 Outlook", OUTLOOK_PAGES[3]),
+        ("Active MDs",    f"{SPC_BASE}/products/md/"),
+        ("SPC Homepage",  SPC_BASE),
     ]:
-        btns += f'<a href="{url}" style="display:inline-block;margin:4px 5px 4px 0;padding:7px 13px;background:#1a1f5e;color:#d4a843;border-radius:5px;font-size:12px;font-weight:700;text-decoration:none;">{name}</a>'
+        btns += (
+            f'<a href="{url}" style="display:inline-block;margin:4px 5px 4px 0;padding:7px 13px;'
+            f'background:#1a1f5e;color:#d4a843;border-radius:5px;font-size:12px;font-weight:700;'
+            f'text-decoration:none;">{name}</a>'
+        )
 
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#eef0f5;font-family:Arial,Helvetica,sans-serif;">
@@ -338,9 +310,8 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
   <div style="background:#1a1f5e;padding:28px 28px 22px;text-align:center;">
     <img src="cid:cwo_logo" alt="Colletti Weather Office"
          style="max-width:130px;height:auto;display:block;margin:0 auto 14px;" />
-    <h1 style="margin:0;color:#d4a843;font-size:20px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;">
-      Daily SPC Outlook Brief
-    </h1>
+    <h1 style="margin:0;color:#d4a843;font-size:20px;letter-spacing:1.5px;
+               text-transform:uppercase;font-weight:700;">Daily SPC Outlook Brief</h1>
     <p style="margin:6px 0 2px;color:#8fa8d8;font-size:13px;">
       NWS Chicago (LOT) &nbsp;·&nbsp; NWS Milwaukee (MKX) &nbsp;·&nbsp; NWS Quad Cities (DVN)
     </p>
@@ -348,37 +319,43 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
   </div>
 
   <!-- NATIONAL CATEGORICAL -->
-  <div style="background:#fff;margin:14px 14px 0;border-radius:8px;padding:20px 22px;border-top:4px solid #1a1f5e;">
-    <h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">
-      📊 National Categorical Risk
-    </h2>
+  <div style="background:#fff;margin:14px 14px 0;border-radius:8px;padding:20px 22px;
+              border-top:4px solid #1a1f5e;">
+    <h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;text-transform:uppercase;
+               letter-spacing:0.8px;font-weight:700;">📊 National Categorical Risk</h2>
     <table style="width:100%;border-collapse:collapse;">
       <tr style="background:#eef1f8;">
-        <td style="padding:10px 14px;font-weight:700;color:#1a1f5e;font-size:14px;width:110px;">Day 1 Outlook</td>
+        <td style="padding:10px 14px;font-weight:700;color:#1a1f5e;font-size:14px;width:120px;">Day 1 Outlook</td>
         <td style="padding:10px 14px;font-size:14px;">{nat1}</td>
-        <td style="padding:10px 14px;text-align:right;"><a href="{OUTLOOK_PAGES[1]}" style="font-size:11px;color:#1a3a5c;text-decoration:none;">View ↗</a></td>
+        <td style="padding:6px 14px;text-align:right;">
+          <a href="{OUTLOOK_PAGES[1]}" style="font-size:11px;color:#1a3a5c;text-decoration:none;">View ↗</a>
+        </td>
       </tr>
       <tr>
         <td style="padding:10px 14px;font-weight:700;color:#1a1f5e;font-size:14px;">Day 2 Outlook</td>
         <td style="padding:10px 14px;font-size:14px;">{nat2}</td>
-        <td style="padding:10px 14px;text-align:right;"><a href="{OUTLOOK_PAGES[2]}" style="font-size:11px;color:#1a3a5c;text-decoration:none;">View ↗</a></td>
+        <td style="padding:6px 14px;text-align:right;">
+          <a href="{OUTLOOK_PAGES[2]}" style="font-size:11px;color:#1a3a5c;text-decoration:none;">View ↗</a>
+        </td>
       </tr>
       <tr style="background:#eef1f8;">
         <td style="padding:10px 14px;font-weight:700;color:#1a1f5e;font-size:14px;">Day 3 Outlook</td>
         <td style="padding:10px 14px;font-size:14px;">{nat3}</td>
-        <td style="padding:10px 14px;text-align:right;"><a href="{OUTLOOK_PAGES[3]}" style="font-size:11px;color:#1a3a5c;text-decoration:none;">View ↗</a></td>
+        <td style="padding:6px 14px;text-align:right;">
+          <a href="{OUTLOOK_PAGES[3]}" style="font-size:11px;color:#1a3a5c;text-decoration:none;">View ↗</a>
+        </td>
       </tr>
     </table>
   </div>
 
-  <!-- CWO AREA RISKS -->
-  <div style="background:#fff;margin:10px 14px 0;border-radius:8px;padding:20px 22px;border-top:4px solid #d4a843;">
-    <h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">
-      📍 CWO Area Risk (LOT / MKX / DVN)
-    </h2>
+  <!-- CWO AREA RISK -->
+  <div style="background:#fff;margin:10px 14px 0;border-radius:8px;padding:20px 22px;
+              border-top:4px solid #d4a843;">
+    <h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;text-transform:uppercase;
+               letter-spacing:0.8px;font-weight:700;">📍 CWO Area Risk (LOT / MKX / DVN)</h2>
     <table style="width:100%;border-collapse:collapse;">
       <tr style="background:#eef1f8;">
-        <td style="padding:10px 14px;font-weight:700;color:#1a1f5e;font-size:13px;width:130px;">Categorical</td>
+        <td style="padding:10px 14px;font-weight:700;color:#1a1f5e;font-size:13px;width:120px;">Categorical</td>
         <td style="padding:10px 14px;font-size:13px;">{cwo_risks['cat']}</td>
       </tr>
       <tr>
@@ -394,34 +371,50 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
         <td style="padding:10px 14px;font-size:13px;">{cwo_risks['hail']}</td>
       </tr>
     </table>
-    <p style="font-size:11px;color:#aaa;margin:10px 0 0;">Based on SPC probability contours intersecting LOT/MKX/DVN bounding box.</p>
+    <p style="font-size:11px;color:#bbb;margin:10px 0 0;">
+      Based on SPC probability contours intersecting LOT/MKX/DVN bounding box.
+    </p>
   </div>
 
-  <!-- HAZARD TEXT SECTIONS -->
+  <!-- THUNDERSTORM IMAGE -->
   <div style="background:#fff;margin:10px 14px 0;border-radius:8px;padding:20px 22px;">
-    <h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">
-      ⚡ Day 1 Outlook Hazard Text
-    </h2>
+    <h2 style="margin:0 0 12px;font-size:14px;color:#1a1f5e;text-transform:uppercase;
+               letter-spacing:0.8px;font-weight:700;">⛈️ Day 1 Outlook Map</h2>
+    {tstm_img_html}
+  </div>
+
+  <!-- HAZARD TEXT -->
+  <div style="background:#fff;margin:10px 14px 0;border-radius:8px;padding:20px 22px;">
+    <h2 style="margin:0 0 14px;font-size:14px;color:#1a1f5e;text-transform:uppercase;
+               letter-spacing:0.8px;font-weight:700;">⚡ Day 1 Hazard Text</h2>
 
     <p style="font-weight:700;color:#c0392b;font-size:13px;margin:0 0 4px;">🌪️ TORNADO</p>
-    <pre style="background:#fdf2f0;border-left:3px solid #c0392b;padding:10px 14px;font-size:12px;white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0 0 14px;color:#333;line-height:1.6;font-family:monospace;">{torn_txt}</pre>
+    <pre style="background:#fdf2f0;border-left:3px solid #c0392b;padding:10px 14px;font-size:12px;
+                white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0 0 14px;color:#333;
+                line-height:1.6;font-family:monospace;">{torn_txt}</pre>
 
     <p style="font-weight:700;color:#2471a3;font-size:13px;margin:0 0 4px;">💨 WIND</p>
-    <pre style="background:#eaf4fb;border-left:3px solid #2471a3;padding:10px 14px;font-size:12px;white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0 0 14px;color:#333;line-height:1.6;font-family:monospace;">{wind_txt}</pre>
+    <pre style="background:#eaf4fb;border-left:3px solid #2471a3;padding:10px 14px;font-size:12px;
+                white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0 0 14px;color:#333;
+                line-height:1.6;font-family:monospace;">{wind_txt}</pre>
 
     <p style="font-weight:700;color:#1e8449;font-size:13px;margin:0 0 4px;">🧊 HAIL</p>
-    <pre style="background:#eafaf1;border-left:3px solid #1e8449;padding:10px 14px;font-size:12px;white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0 0 14px;color:#333;line-height:1.6;font-family:monospace;">{hail_txt}</pre>
+    <pre style="background:#eafaf1;border-left:3px solid #1e8449;padding:10px 14px;font-size:12px;
+                white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0 0 14px;color:#333;
+                line-height:1.6;font-family:monospace;">{hail_txt}</pre>
 
     <p style="font-weight:700;color:#6c3483;font-size:13px;margin:0 0 4px;">⛈️ THUNDERSTORMS</p>
-    <pre style="background:#f5eef8;border-left:3px solid #6c3483;padding:10px 14px;font-size:12px;white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0;color:#333;line-height:1.6;font-family:monospace;">{tstm_txt}</pre>
+    <pre style="background:#f5eef8;border-left:3px solid #6c3483;padding:10px 14px;font-size:12px;
+                white-space:pre-wrap;border-radius:0 4px 4px 0;margin:0;color:#333;
+                line-height:1.6;font-family:monospace;">{tstm_txt}</pre>
   </div>
 
-  <!-- FULL DAY 1 TEXT -->
+  <!-- FULL TEXT -->
   <div style="background:#fff;margin:10px 14px 0;border-radius:8px;padding:20px 22px;">
-    <h2 style="margin:0 0 12px;font-size:14px;color:#1a1f5e;text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">
-      📋 Day 1 Outlook Full Text
-    </h2>
-    <pre style="background:#f4f6f8;padding:14px;font-size:12px;white-space:pre-wrap;border-radius:6px;margin:0;color:#222;line-height:1.65;font-family:monospace;">{summary}</pre>
+    <h2 style="margin:0 0 12px;font-size:14px;color:#1a1f5e;text-transform:uppercase;
+               letter-spacing:0.8px;font-weight:700;">📋 Day 1 Outlook Full Text</h2>
+    <pre style="background:#f4f6f8;padding:14px;font-size:12px;white-space:pre-wrap;
+                border-radius:6px;margin:0;color:#222;line-height:1.65;font-family:monospace;">{summary}</pre>
     <p style="font-size:12px;color:#888;margin:8px 0 0;">
       Full product: <a href="{OUTLOOK_PAGES[1]}" style="color:#1a3a5c;">SPC Day 1 Outlook ↗</a>
     </p>
@@ -429,9 +422,8 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
 
   <!-- MDs -->
   <div style="background:#fff;margin:10px 14px 0;border-radius:8px;padding:20px 22px;">
-    <h2 style="margin:0 0 12px;font-size:14px;color:#1a1f5e;text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">
-      🔍 Active Mesoscale Discussions
-    </h2>
+    <h2 style="margin:0 0 12px;font-size:14px;color:#1a1f5e;text-transform:uppercase;
+               letter-spacing:0.8px;font-weight:700;">🔍 Active Mesoscale Discussions</h2>
     {md_html}
     <p style="font-size:12px;color:#888;margin:10px 0 0;">
       <a href="{SPC_BASE}/products/md/" style="color:#1a3a5c;">All active MDs on SPC ↗</a>
@@ -440,14 +432,14 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
 
   <!-- SPC LINKS -->
   <div style="background:#fff;margin:10px 14px 0;border-radius:8px;padding:20px 22px;">
-    <h2 style="margin:0 0 10px;font-size:14px;color:#1a1f5e;text-transform:uppercase;letter-spacing:0.8px;font-weight:700;">
-      🗺️ SPC Links
-    </h2>
+    <h2 style="margin:0 0 10px;font-size:14px;color:#1a1f5e;text-transform:uppercase;
+               letter-spacing:0.8px;font-weight:700;">🗺️ SPC Links</h2>
     {btns}
   </div>
 
   <!-- FOOTER -->
-  <div style="background:#1a1f5e;margin:14px 14px 0;border-radius:8px;padding:22px 24px;text-align:center;">
+  <div style="background:#1a1f5e;margin:14px 14px 0;border-radius:8px;
+              padding:22px 24px;text-align:center;">
     <p style="margin:0 0 4px;color:#d4a843;font-weight:700;font-size:15px;letter-spacing:0.5px;">
       Colletti Weather Office
     </p>
@@ -477,7 +469,7 @@ def build_html(day1_text, day2_text, day3_text, cwo_risks, mds):
 
 # ── SEND ───────────────────────────────────────────────────────────────────────
 
-def send_email(subject, html_body):
+def send_email(subject, html_body, tstm_img_bytes=None):
     msg = MIMEMultipart("related")
     msg["Subject"]  = subject
     msg["From"]     = GMAIL_USER
@@ -488,17 +480,25 @@ def send_email(subject, html_body):
     alt.attach(MIMEText(html_body, "html"))
     msg.attach(alt)
 
-    # Attach logo from repo root (must be named cwo_logo.png)
+    # Attach CWO logo
     logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cwo_logo.png")
     if os.path.exists(logo_path):
         with open(logo_path, "rb") as f:
-            img = MIMEImage(f.read())
-        img.add_header("Content-ID", "<cwo_logo>")
-        img.add_header("Content-Disposition", "inline", filename="cwo_logo.png")
-        msg.attach(img)
+            logo = MIMEImage(f.read())
+        logo.add_header("Content-ID", "<cwo_logo>")
+        logo.add_header("Content-Disposition", "inline", filename="cwo_logo.png")
+        msg.attach(logo)
         print("[CWO] Logo attached.")
     else:
-        print(f"[CWO] WARNING: logo not found at {logo_path}")
+        print(f"[CWO] WARNING: cwo_logo.png not found at {logo_path}")
+
+    # Attach thunderstorm image
+    if tstm_img_bytes:
+        tstm = MIMEImage(tstm_img_bytes, _subtype="gif")
+        tstm.add_header("Content-ID", "<tstm_img>")
+        tstm.add_header("Content-Disposition", "inline", filename="day1outlook.gif")
+        msg.attach(tstm)
+        print("[CWO] Thunderstorm image attached.")
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_PASS)
@@ -515,21 +515,23 @@ def main():
     day3_text = get_outlook_text(3)
     print(f"[CWO] Day 1 national: {get_national_category(day1_text)}")
 
-    print("[CWO] Querying CWO area risks via NOAA FeatureServer...")
-    cwo_risks = get_cwo_area_risks()
+    print("[CWO] Querying CWO area risks...")
+    cwo_risks = get_cwo_risks()
     print(f"[CWO] CWO categorical: {cwo_risks['cat']}")
-    print(f"[CWO] CWO tornado: {cwo_risks['torn']}")
 
     print("[CWO] Fetching MDs...")
     mds = get_active_mds()
     print(f"[CWO] {len(mds)} active MD(s)")
 
-    now_str   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    nat1      = get_national_category(day1_text)
-    subject   = f"[CWO] SPC Brief — {now_str} | Day 1: {nat1} | CWO: {cwo_risks['cat']}"
+    print("[CWO] Fetching thunderstorm image...")
+    tstm_img = fetch_tstm_image()
 
-    html = build_html(day1_text, day2_text, day3_text, cwo_risks, mds)
-    send_email(subject, html)
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    nat1    = get_national_category(day1_text)
+    subject = f"[CWO] SPC Brief — {now_str} | Day 1: {nat1} | CWO: {cwo_risks['cat']}"
+
+    html = build_html(day1_text, day2_text, day3_text, cwo_risks, mds, tstm_img is not None)
+    send_email(subject, html, tstm_img)
     print("[CWO] Done.")
 
 
