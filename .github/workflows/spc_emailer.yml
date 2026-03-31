@@ -2,8 +2,10 @@ name: CWO SPC Daily Outlook Emailer
 
 on:
   schedule:
-    - cron: "0 13 * * *"
-    - cron: "0 19 * * *"
+    # 1315Z = after SPC morning outlooks are all issued
+    - cron: "15 13 * * *"
+    # 2015Z = after SPC afternoon update
+    - cron: "15 20 * * *"
   workflow_dispatch:
 
 jobs:
