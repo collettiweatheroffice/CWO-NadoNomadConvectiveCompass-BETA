@@ -1,6 +1,6 @@
 # -*- coding: ascii -*-
 """
-CWO SPC Daily Outlook Emailer v9
+CWO SPC Daily Outlook Emailer v9.1
 Colletti Weather Office - LOT / MKX / DVN
 "Nado Nomad's Convective Compass"
 """
@@ -79,11 +79,20 @@ CAT_META = {
 }
 NO_RISK = ("No Thunder / Below Threshold", "&#9898;", "#bdc3c7")
 
-PROB_VALUES = {
-    "2":    2,  "5":    5,  "10": 10, "15": 15,
-    "30":  30,  "45":  45,  "60": 60,
-    "0.02": 2,  "0.05": 5,  "0.10": 10, "0.15": 15,
-    "0.30": 30, "0.45": 45, "0.60": 60,
+# Tornado: 2, 5, 10, 15, 30, 45, 60
+TORN_PROB_VALUES = {
+    "2": 2, "5": 5, "10": 10, "15": 15, "30": 30, "45": 45, "60": 60,
+    "0.02": 2, "0.05": 5, "0.10": 10, "0.15": 15, "0.30": 30, "0.45": 45, "0.60": 60,
+}
+# Wind: 5, 15, 30, 45, 60, 75, 90
+WIND_PROB_VALUES = {
+    "5": 5, "15": 15, "30": 30, "45": 45, "60": 60, "75": 75, "90": 90,
+    "0.05": 5, "0.15": 15, "0.30": 30, "0.45": 45, "0.60": 60, "0.75": 75, "0.90": 90,
+}
+# Hail: 5, 15, 30, 45, 60
+HAIL_PROB_VALUES = {
+    "5": 5, "15": 15, "30": 30, "45": 45, "60": 60,
+    "0.05": 5, "0.15": 15, "0.30": 30, "0.45": 45, "0.60": 60,
 }
 
 
@@ -228,21 +237,21 @@ def best_cat_key(feats):
     return None
 
 
-def best_prob(feats, layer_name=""):
+def best_prob(feats, prob_map, layer_name=""):
     vals = []
     for f in feats:
         # Try all possible field names - prob layers use "valid" field
         for field in ["valid", "dn", "DN", "PROB", "prob", "label", "LABEL"]:
             raw = str(f.get(field, "")).strip()
-            if raw in PROB_VALUES:
-                vals.append(PROB_VALUES[raw])
+            if raw in prob_map:
+                vals.append(prob_map[raw])
                 break
         else:
-            # Last resort: check all fields for a numeric prob value
+            # Last resort: check all field values
             for field, val in f.items():
                 raw = str(val).strip()
-                if raw in PROB_VALUES:
-                    vals.append(PROB_VALUES[raw])
+                if raw in prob_map:
+                    vals.append(prob_map[raw])
                     break
     if vals:
         best = max(vals)
@@ -260,9 +269,9 @@ def get_cwo_risks():
     wind_feats = query_layer(LAYER_WIND)
 
     cat_key = best_cat_key(cat_feats)
-    torn    = best_prob(torn_feats, "Tornado")
-    wind    = best_prob(wind_feats, "Wind")
-    hail    = best_prob(hail_feats, "Hail")
+    torn    = best_prob(torn_feats, TORN_PROB_VALUES, "Tornado")
+    wind    = best_prob(wind_feats, WIND_PROB_VALUES, "Wind")
+    hail    = best_prob(hail_feats, HAIL_PROB_VALUES, "Hail")
 
     return {
         "cat_key": cat_key,
@@ -398,7 +407,8 @@ def build_html(day1_text, day2_text, day3_text, cwo, mds):
     cwo_card  = section_card("CWO Area Risk (LOT / MKX / DVN)", cwo_body, "#d4a843")
 
     # -- Hazard text --
-    haz_body  = '<p style="font-weight:700;color:#c0392b;font-size:13px;margin:0 0 4px;">Tornado</p>'
+    haz_body  = '<p style="font-weight:700;color:#999;font-size:11px;margin:0 0 10px;font-style:italic;">The following text is from the national SPC Day 1 Convective Outlook and describes conditions across the broader CONUS, not specifically the CWO area.</p>'
+    haz_body += '<p style="font-weight:700;color:#c0392b;font-size:13px;margin:0 0 4px;">Tornado</p>'
     haz_body += pre_block(torn_txt, "#c0392b", "#fdf2f0")
     haz_body += '<p style="font-weight:700;color:#2471a3;font-size:13px;margin:14px 0 4px;">Wind</p>'
     haz_body += pre_block(wind_txt, "#2471a3", "#eaf4fb")
@@ -406,7 +416,7 @@ def build_html(day1_text, day2_text, day3_text, cwo, mds):
     haz_body += pre_block(hail_txt, "#1e8449", "#eafaf1")
     haz_body += '<p style="font-weight:700;color:#6c3483;font-size:13px;margin:14px 0 4px;">Thunderstorms</p>'
     haz_body += pre_block(tstm_txt, "#6c3483", "#f5eef8")
-    haz_card  = section_card("Day 1 Hazard Text", haz_body)
+    haz_card  = section_card("Day 1 Hazard Text (National)", haz_body)
 
     # -- Full text --
     full_body  = '<pre style="background:#f4f6f8;padding:14px;font-size:12px;'
