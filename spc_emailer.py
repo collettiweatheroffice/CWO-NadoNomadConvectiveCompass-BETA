@@ -1,7 +1,7 @@
 # -*- coding: ascii -*-
 """
-CWO SPC Daily Outlook Emailer v9.1.3
-Colletti Weather Office - LOT / MKX / DVN
+CWO SPC Daily Outlook Emailer v9.1.4
+Colletti Weather Office - KEAX (NWS Kansas City)
 "Nado Nomad's Convective Compass"
 """
 import smtplib
@@ -24,9 +24,9 @@ UNSUB_URL  = "https://forms.gle/Jg5opiANhsZfBGYT9"
 YT_URL     = "https://www.youtube.com/@MidwestMeteorology"
 SPC_BASE   = "https://www.spc.noaa.gov"
 
-# CWO bounding box: LOT + MKX + DVN
-CWO_XMIN, CWO_XMAX = -91.5, -86.5
-CWO_YMIN, CWO_YMAX =  40.5,  44.0
+# CWO bounding box: KEAX (NWS Kansas City)
+CWO_XMIN, CWO_XMAX = -95.5, -91.5
+CWO_YMIN, CWO_YMAX =  37.5,  40.5
 
 TEXT_URLS = {
     1: "https://tgftp.nws.noaa.gov/data/raw/ac/acus01.kwns.swo.dy1.txt",
@@ -43,10 +43,19 @@ FEATURE_BASE = (
     "https://mapservices.weather.noaa.gov"
     "/vector/rest/services/outlooks/SPC_wx_outlks/FeatureServer"
 )
+
+# Confirmed layer IDs from live MapServer query (updated March 2026):
+# Layer 1  = Day 1 Categorical
+# Layer 2  = Day 1 Significant Tornado
+# Layer 3  = Day 1 Probabilistic Tornado
+# Layer 4  = Day 1 Significant Hail
+# Layer 5  = Day 1 Probabilistic Hail
+# Layer 6  = Day 1 Significant Wind
+# Layer 7  = Day 1 Probabilistic Wind
 LAYER_CAT  = 1
-LAYER_TORN = 2
-LAYER_WIND = 3
-LAYER_HAIL = 4
+LAYER_TORN = 3
+LAYER_HAIL = 5
+LAYER_WIND = 7
 
 CAT_ORDER = ["HIGH", "MDT", "ENH", "SLGT", "MRGL", "TSTM"]
 
@@ -173,13 +182,13 @@ def query_layer(layer_id):
     envelope = (str(CWO_XMIN) + "," + str(CWO_YMIN) + "," +
                 str(CWO_XMAX) + "," + str(CWO_YMAX))
     params = urllib.parse.urlencode({
-        "geometry":     envelope,
-        "geometryType": "esriGeometryEnvelope",
-        "spatialRel":   "esriSpatialRelIntersects",
-        "inSR":         "4326",
-        "outFields":    "*",
+        "geometry":       envelope,
+        "geometryType":   "esriGeometryEnvelope",
+        "spatialRel":     "esriSpatialRelIntersects",
+        "inSR":           "4326",
+        "outFields":      "*",
         "returnGeometry": "false",
-        "f": "json",
+        "f":              "json",
     })
     url = FEATURE_BASE + "/" + str(layer_id) + "/query?" + params
     try:
@@ -211,7 +220,6 @@ def best_prob(feats, prob_map, layer_name=""):
             raw = f.get(field)
             if raw is None:
                 continue
-            # Normalize: float 0.05 -> "0.05", int/str 5 -> "5"
             if isinstance(raw, float):
                 key = str(round(raw, 2))
             else:
@@ -219,7 +227,6 @@ def best_prob(feats, prob_map, layer_name=""):
             if key in prob_map:
                 vals.append(prob_map[key])
                 break
-            # Secondary: try as plain integer string (e.g. 10.0 -> "10")
             try:
                 as_int = str(int(float(key)))
                 if as_int in prob_map:
@@ -358,8 +365,8 @@ def build_html(day1_text, day2_text, day3_text, cwo, mds):
     cwo_body += prob_bar("Wind",    cwo["wind"], "&#128168;")
     cwo_body += prob_bar("Hail",    cwo["hail"], "&#129514;")
     cwo_body += '<p style="font-size:11px;color:#bbb;margin:8px 0 0;">'
-    cwo_body += "Based on SPC probability contours intersecting the LOT/MKX/DVN bounding box.</p>"
-    cwo_card  = section_card("CWO Area Risk (LOT / MKX / DVN)", cwo_body, "#d4a843")
+    cwo_body += "Based on SPC probability contours intersecting the KEAX bounding box.</p>"
+    cwo_card  = section_card("CWO Area Risk (KEAX - NWS Kansas City)", cwo_body, "#d4a843")
 
     # -- Hazard text --
     haz_body  = '<p style="font-weight:700;color:#999;font-size:11px;margin:0 0 10px;font-style:italic;">The following text is from the national SPC Day 1 Convective Outlook and describes conditions across the broader CONUS, not specifically the CWO area.</p>'
@@ -458,18 +465,9 @@ def build_html(day1_text, day2_text, day3_text, cwo, mds):
     out += '<p style="margin:4px 0 2px;color:#aac4e0;font-size:12px;'
     out += 'letter-spacing:0.5px;">Colletti Weather Office</p>'
     out += '<p style="margin:4px 0 2px;color:#8fa8d8;font-size:13px;">'
-    out += "NWS Chicago (LOT) &middot; NWS Milwaukee (MKX) &middot; NWS Quad Cities (DVN)</p>"
+    out += "NWS Kansas City (KEAX)</p>"
     out += '<p style="margin:0;color:#5566aa;font-size:11px;">' + now_utc + "</p>"
     out += "</div>"
-
-    # Day 1 outlook map image (most recent issuance, auto-updates)
-    out += '<div style="margin:10px 14px 0;">'
-    out += '<a href="' + OUTLOOK_PAGES[1] + '">'
-    out += '<img src="https://www.spc.noaa.gov/products/outlook/day1otlk.gif" '
-    out += 'alt="SPC Day 1 Convective Outlook" '
-    out += 'style="width:100%;border-radius:8px;display:block;" />'
-    out += '</a>'
-    out += '</div>'
 
     out += nat_card
     out += cwo_card
