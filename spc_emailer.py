@@ -24,9 +24,9 @@ UNSUB_URL  = "https://forms.gle/Jg5opiANhsZfBGYT9"
 YT_URL     = "https://www.youtube.com/@MidwestMeteorology"
 SPC_BASE   = "https://www.spc.noaa.gov"
 
-# CWO bounding box: KEAX (NWS Kansas City)
-CWO_XMIN, CWO_XMAX = -95.5, -91.5
-CWO_YMIN, CWO_YMAX =  37.5,  40.5
+# CWO bounding box: LOT, DVN, MKX (NWS Chicago, Davenport, Milwaukee)
+CWO_XMIN, CWO_XMAX = -91.5, -86.5
+CWO_YMIN, CWO_YMAX =  40.5,  44.0
 
 TEXT_URLS = {
     1: "https://tgftp.nws.noaa.gov/data/raw/ac/acus01.kwns.swo.dy1.txt",
@@ -365,8 +365,8 @@ def build_html(day1_text, day2_text, day3_text, cwo, mds):
     cwo_body += prob_bar("Wind",    cwo["wind"], "&#128168;")
     cwo_body += prob_bar("Hail",    cwo["hail"], "&#129514;")
     cwo_body += '<p style="font-size:11px;color:#bbb;margin:8px 0 0;">'
-    cwo_body += "Based on SPC probability contours intersecting the KEAX bounding box.</p>"
-    cwo_card  = section_card("CWO Area Risk (KEAX - NWS Kansas City)", cwo_body, "#d4a843")
+    cwo_body += "Based on SPC probability contours intersecting the LOT/MKX/DVN bounding box.</p>"
+    cwo_card  = section_card("CWO Area Risk (LOT / MKX / DVN)", cwo_body, "#d4a843")
 
     # -- Hazard text --
     haz_body  = '<p style="font-weight:700;color:#999;font-size:11px;margin:0 0 10px;font-style:italic;">The following text is from the national SPC Day 1 Convective Outlook and describes conditions across the broader CONUS, not specifically the CWO area.</p>'
@@ -465,7 +465,7 @@ def build_html(day1_text, day2_text, day3_text, cwo, mds):
     out += '<p style="margin:4px 0 2px;color:#aac4e0;font-size:12px;'
     out += 'letter-spacing:0.5px;">Colletti Weather Office</p>'
     out += '<p style="margin:4px 0 2px;color:#8fa8d8;font-size:13px;">'
-    out += "NWS Kansas City (KEAX)</p>"
+    out += "NWS Chicago (LOT) &middot; NWS Milwaukee (MKX) &middot; NWS Quad Cities (DVN)</p>"
     out += '<p style="margin:0;color:#5566aa;font-size:11px;">' + now_utc + "</p>"
     out += "</div>"
 
