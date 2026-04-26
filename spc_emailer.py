@@ -26,6 +26,7 @@ YT_URL     = "https://www.youtube.com/@MidwestMeteorology"
 
 SPC_BASE   = "https://www.spc.noaa.gov"
 
+# CWO bounding box: LOT + MKX + DVN
 CWO_XMIN, CWO_XMAX = -91.5, -86.5
 CWO_YMIN, CWO_YMAX =  40.5,  44.0
 
@@ -53,12 +54,12 @@ LAYER_HAIL = 4
 CAT_ORDER = ["HIGH", "MDT", "ENH", "SLGT", "MRGL", "TSTM"]
 
 CAT_NUM_MAP = {
-    "2": "TSTM",
-    "3": "MRGL",
-    "4": "SLGT",
-    "5": "ENH",
-    "6": "MDT",
-    "8": "HIGH",
+    "2": "TSTM", "2.0": "TSTM",
+    "3": "MRGL", "3.0": "MRGL",
+    "4": "SLGT", "4.0": "SLGT",
+    "5": "ENH",  "5.0": "ENH",
+    "6": "MDT",  "6.0": "MDT",
+    "8": "HIGH", "8.0": "HIGH",
 }
 
 CAT_META = {
@@ -118,7 +119,7 @@ def get_outlook_text(day=1):
         text = re.sub(r"\$\$.*", "", text, flags=re.DOTALL).strip()
         return text if text else raw[:3000]
     except Exception as e:
-        return "[Could not retrieve Day " + str(day) + " text: " + str(e)]
+        return "[Could not retrieve Day " + str(day) + " text: " + str(e) + "]"
 
 def get_national_cat_key(text):
     upper = text.upper()
@@ -135,40 +136,21 @@ def get_national_cat_key(text):
             return key
     return None
 
-def cat_label(key):
-    return CAT_META[key][0] if key in CAT_META else NO_RISK[0]
-
-def cat_circle(key):
-    return CAT_META[key][1] if key in CAT_META else NO_RISK[1]
-
-def cat_color(key):
-    return CAT_META[key][2] if key in CAT_META else NO_RISK[2]
-
-# -------- FIXED FUNCTION --------
 def best_cat_key(feats):
     found = set()
-
     for f in feats:
         raw = f.get("dn", f.get("DN", None))
         if raw is None:
             continue
-
-        raw_str = str(raw).strip()
-
-        if raw_str.endswith(".0"):
-            raw_str = raw_str[:-2]
-
-        mapped = CAT_NUM_MAP.get(raw_str)
-
+        raw = str(raw).strip()
+        if raw.endswith(".0"):
+            raw = raw[:-2]
+        mapped = CAT_NUM_MAP.get(raw)
         if mapped:
             found.add(mapped)
-
-    print("[CWO] Cat values found (normalized): " + str(found))
-
     for lvl in CAT_ORDER:
         if lvl in found:
             return lvl
-
     return None
 
 def best_prob(feats, prob_map, layer_name=""):
@@ -199,7 +181,6 @@ def query_layer(layer_id):
     except:
         return []
 
-# -------- FIXED FALLBACK --------
 def get_cwo_risks():
     cat_feats  = query_layer(LAYER_CAT)
     torn_feats = query_layer(LAYER_TORN)
@@ -212,7 +193,8 @@ def get_cwo_risks():
     hail    = best_prob(hail_feats, HAIL_PROB_VALUES)
 
     if not cat_key and torn == 0 and wind == 0 and hail == 0:
-        print("[CWO] WARNING: No data returned, defaulting to TSTM")
         cat_key = "TSTM"
 
     return {"cat_key": cat_key, "torn": torn, "hail": hail, "wind": wind}
+
+# --- rest of your code unchanged (HTML, send_email, main, etc) ---
