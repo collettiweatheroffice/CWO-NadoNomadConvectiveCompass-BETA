@@ -1,7 +1,7 @@
 # -*- coding: ascii -*-
 """
-CWO SPC Daily Outlook Emailer v9.1.4
-Colletti Weather Office - KEAX (NWS Kansas City)
+CWO SPC Daily Outlook Emailer v9.1.4.2
+Colletti Weather Office - 
 "Nado Nomad's Convective Compass"
 """
 import smtplib
@@ -365,7 +365,7 @@ def build_html(day1_text, day2_text, day3_text, cwo, mds):
     cwo_body += prob_bar("Wind",    cwo["wind"], "&#128168;")
     cwo_body += prob_bar("Hail",    cwo["hail"], "&#129514;")
     cwo_body += '<p style="font-size:11px;color:#bbb;margin:8px 0 0;">'
-    cwo_body += "Based on SPC probability contours intersecting the LOT/MKX/DVN bounding box.</p>"
+    cwo_body += "This is the highest risk anywhere within the NWS LOT, MKX, and DVN areas. For more specific info visit <a href='https://www.spc.noaa.gov' style='color:#bbb;'>spc.noaa.gov</a>.</p>"
     cwo_card  = section_card("CWO Area Risk (LOT / MKX / DVN)", cwo_body, "#d4a843")
 
     # -- Hazard text --
