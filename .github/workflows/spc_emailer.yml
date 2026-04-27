@@ -2,16 +2,13 @@ name: CWO SPC Daily Outlook Emailer
 
 on:
   schedule:
-    # 1315Z = after SPC morning outlooks are all issued
-    - cron: "15 13 * * *"
-    # 2015Z = after SPC afternoon update
-    - cron: "15 20 * * *"
+    - cron: "10 13 * * *"
+    - cron: "10 20 * * *"
   workflow_dispatch:
 
 jobs:
   send-outlook-email:
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
